@@ -69,6 +69,23 @@ def get_ad_unit_ids_by_name(ad_unit_names):
     ad_unit_ids.append(get_ad_unit_by_name(ad_unit_name)['id'])
   return ad_unit_ids
 
+def get_root_ad_unit_id():
+  """
+  Gets root ad unit ID from DFP.
+
+  Returns:
+    an ad unit ID, or None
+  """
+
+  dfp_client = get_client()
+  network_service = dfp_client.GetService('NetworkService', version='v201811')
+  current_network = network_service.getCurrentNetwork()
+
+  if hasattr(current_network, 'effectiveRootAdUnitId'):
+    return current_network.effectiveRootAdUnitId
+
+  return None  
+
 def main():
   """
   Loads ad units from settings and fetches them from DFP.

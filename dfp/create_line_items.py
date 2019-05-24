@@ -23,8 +23,8 @@ def create_line_items(line_items):
     created_line_item_ids.append(line_item['id'])
   return created_line_item_ids
 
-def create_line_item_config(name, order_id, placement_ids, ad_unit_ids, cpm_micro_amount, sizes, hb_bidder_key_id,
-                            hb_pb_key_id, hb_bidder_value_id, hb_pb_value_id, currency_code='USD'):
+def create_line_item_config(name, order_id, cpm_micro_amount, sizes,
+                            hb_pb_key_id, hb_pb_value_id, currency_code='USD', root_ad_unit_id=None):
   """
   Creates a line item config object.
 
@@ -56,11 +56,11 @@ def create_line_item_config(name, order_id, placement_ids, ad_unit_ids, cpm_micr
   # https://github.com/googleads/googleads-python-lib/blob/master/examples/dfp/v201802/line_item_service/target_custom_criteria.py
   # create custom criterias
 
-  hb_bidder_criteria = {
-    'xsi_type': 'CustomCriteria',
-    'keyId': hb_bidder_key_id,
-    'valueIds': [hb_bidder_value_id],
-    'operator': 'IS'
+  inventory = {
+    'targetedAdUnits': [{
+      'adUnitId': root_ad_unit_id,
+      'includeDescendants': 'true'
+    }]
   }
 
   hb_pb_criteria = {
@@ -76,7 +76,7 @@ def create_line_item_config(name, order_id, placement_ids, ad_unit_ids, cpm_micr
   top_set = {
     'xsi_type': 'CustomCriteriaSet',
     'logicalOperator': 'AND',
-    'children': [hb_bidder_criteria, hb_pb_criteria]
+    'children': [hb_pb_criteria]
   }
 
   # https://developers.google.com/doubleclick-publishers/docs/reference/v201802/LineItemService.LineItem
@@ -85,7 +85,7 @@ def create_line_item_config(name, order_id, placement_ids, ad_unit_ids, cpm_micr
     'orderId': order_id,
     # https://developers.google.com/doubleclick-publishers/docs/reference/v201802/LineItemService.Targeting
     'targeting': {
-      'inventoryTargeting': {},
+      'inventoryTargeting': inventory,
       'customTargeting': top_set,
     },
     'startDateTimeType': 'IMMEDIATELY',
@@ -102,10 +102,5 @@ def create_line_item_config(name, order_id, placement_ids, ad_unit_ids, cpm_micr
     },
     'creativePlaceholders': creative_placeholders,
   }
-  if placement_ids is not None:
-    line_item_config['targeting']['inventoryTargeting']['targetedPlacementIds'] = placement_ids
-
-  if ad_unit_ids is not None:
-    line_item_config['targeting']['inventoryTargeting']['targetedAdUnits'] = [{'adUnitId': id} for id in ad_unit_ids]
 
   return line_item_config

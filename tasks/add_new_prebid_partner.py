@@ -49,7 +49,7 @@ else:
 logger = logging.getLogger(__name__)
 
 
-def setup_partner(user_email, advertiser_name, order_name, placements, ad_units, sizes, bidder_code, prices,
+def setup_partner(user_email, advertiser_name, order_name, placements, ad_units, sizes, prices,
                   num_creatives, currency_code):
   """
   Call all necessary DFP tasks for a new Prebid partner setup.
@@ -57,12 +57,6 @@ def setup_partner(user_email, advertiser_name, order_name, placements, ad_units,
 
   # Get the user.
   user_id = dfp.get_users.get_user_id_by_email(user_email)
-
-  # Get the placement IDs.
-  placement_ids = dfp.get_placements.get_placement_ids_by_name(placements)
-
-  # Get the ad unit IDs.
-  ad_unit_ids = dfp.get_ad_units.get_ad_unit_ids_by_name(ad_units)
 
   # Get (or potentially create) the advertiser.
   advertiser_id = dfp.get_advertisers.get_advertiser_id_by_name(
@@ -73,20 +67,18 @@ def setup_partner(user_email, advertiser_name, order_name, placements, ad_units,
 
   # Create creatives.
   creative_configs = dfp.create_creatives.create_duplicate_creative_configs(
-      bidder_code, order_name, advertiser_id, num_creatives)
+      order_name, advertiser_id, num_creatives)
   creative_ids = dfp.create_creatives.create_creatives(creative_configs)
 
   # Get DFP key IDs for line item targeting.
-  hb_bidder_key_id = get_or_create_dfp_targeting_key('hb_bidder')
   hb_pb_key_id = get_or_create_dfp_targeting_key('hb_pb')
 
   # Instantiate DFP targeting value ID getters for the targeting keys.
-  HBBidderValueGetter = DFPValueIdGetter('hb_bidder')
   HBPBValueGetter = DFPValueIdGetter('hb_pb')
 
   # Create line items.
-  line_items_config = create_line_item_configs(prices, order_id, placement_ids, ad_unit_ids, bidder_code, sizes,
-                                               hb_bidder_key_id, hb_pb_key_id, currency_code, HBBidderValueGetter,
+  line_items_config = create_line_item_configs(prices, order_id, sizes,
+                                               hb_pb_key_id, currency_code,
                                                HBPBValueGetter)
   logger.info("Creating line items...")
   line_item_ids = dfp.create_line_items.create_line_items(line_items_config)
@@ -161,8 +153,8 @@ def get_or_create_dfp_targeting_key(name):
     key_id = dfp.create_custom_targeting.create_targeting_key(name)
   return key_id
 
-def create_line_item_configs(prices, order_id, placement_ids, ad_unit_ids, bidder_code, sizes, hb_bidder_key_id,
-                             hb_pb_key_id, currency_code, HBBidderValueGetter, HBPBValueGetter):
+def create_line_item_configs(prices, order_id, sizes,
+                             hb_pb_key_id, currency_code, HBPBValueGetter):
   """
   Create a line item config for each price bucket.
 
@@ -171,7 +163,6 @@ def create_line_item_configs(prices, order_id, placement_ids, ad_unit_ids, bidde
     order_id (int)
     placement_ids (arr)
     ad_unit_ids (arr)
-    bidder_code (str)
     hb_bidder_key_id (int)
     hb_pb_key_id (int)
     currency_code (str)
@@ -182,7 +173,6 @@ def create_line_item_configs(prices, order_id, placement_ids, ad_unit_ids, bidde
   """
 
   # The DFP targeting value ID for this `hb_bidder` code.
-  hb_bidder_value_id = HBBidderValueGetter.get_value_id(bidder_code)
 
   line_items_config = []
   for price in prices:
@@ -190,20 +180,19 @@ def create_line_item_configs(prices, order_id, placement_ids, ad_unit_ids, bidde
     price_str = num_to_str(micro_amount_to_num(price))
 
     # Autogenerate the line item name.
-    line_item_name = u'{bidder_code}: HB ${price}'.format(
-      bidder_code=bidder_code,
+    line_item_name = u'HB ${price}'.format(
       price=price_str
     )
 
     # The DFP targeting value ID for this `hb_pb` price value.
     hb_pb_value_id = HBPBValueGetter.get_value_id(price_str)
 
+    root_ad_unit_id = dfp.get_ad_units.get_root_ad_unit_id()
+
     config = dfp.create_line_items.create_line_item_config(name=line_item_name, order_id=order_id,
-                                                           placement_ids=placement_ids, ad_unit_ids=ad_unit_ids,
                                                            cpm_micro_amount=price, sizes=sizes,
-                                                           hb_bidder_key_id=hb_bidder_key_id, hb_pb_key_id=hb_pb_key_id,
-                                                           hb_bidder_value_id=hb_bidder_value_id,
-                                                           hb_pb_value_id=hb_pb_value_id, currency_code=currency_code)
+                                                           hb_pb_key_id=hb_pb_key_id,
+                                                           hb_pb_value_id=hb_pb_value_id, currency_code=currency_code, root_ad_unit_id=root_ad_unit_id)
 
     line_items_config.append(config)
 
@@ -275,14 +264,8 @@ def main():
   if order_name is None:
     raise MissingSettingException('DFP_ORDER_NAME')
 
-  placements = getattr(settings, 'DFP_TARGETED_PLACEMENT_NAMES', None)
-  ad_units = getattr(settings, 'DFP_TARGETED_AD_UNIT_NAMES', None)
-
-  if ad_units is None and placements is None:
-    raise MissingSettingException('DFP_TARGETED_PLACEMENT_NAMES or DFP_TARGETED_AD_UNIT_NAMES')
-  elif (placements is None or len(placements) < 1) and (ad_units is None or len(ad_units) < 1):
-    raise BadSettingException('The setting "DFP_TARGETED_PLACEMENT_NAMES" or "DFP_TARGETED_AD_UNIT_NAMES" '
-      'must contain at least one DFP placement or ad unit.')
+  placements = None
+  ad_units = None
 
   sizes = getattr(settings, 'DFP_PLACEMENT_SIZES', None)
   if sizes is None:
@@ -300,10 +283,6 @@ def main():
     getattr(settings, 'DFP_NUM_CREATIVES_PER_LINE_ITEM', None) or
     len(placements)
   )
-
-  bidder_code = getattr(settings, 'PREBID_BIDDER_CODE', None)
-  if bidder_code is None:
-    raise MissingSettingException('PREBID_BIDDER_CODE')
 
   price_buckets = getattr(settings, 'PREBID_PRICE_BUCKETS', None)
   if price_buckets is None:
@@ -324,7 +303,7 @@ def main():
 
     Line items will have targeting:
       {name_start_format}hb_pb{format_end} = {value_start_format}{prices_summary}{format_end}
-      {name_start_format}hb_bidder{format_end} = {value_start_format}{bidder_code}{format_end}
+      {name_start_format}hb_bidder{format_end} = {value_start_format}{format_end}
       {name_start_format}placements{format_end} = {value_start_format}{placements}{format_end}
       {name_start_format}ad units{format_end} = {value_start_format}{ad_units}{format_end}
 
@@ -334,7 +313,6 @@ def main():
       advertiser=advertiser_name,
       user_email=user_email,
       prices_summary=prices_summary,
-      bidder_code=bidder_code,
       placements=placements,
       ad_units=ad_units,
       sizes=sizes,
@@ -349,7 +327,7 @@ def main():
     logger.info('Exiting.')
     return
 
-  setup_partner(user_email, advertiser_name, order_name, placements, ad_units, sizes, bidder_code, prices, num_creatives, currency_code)
+  setup_partner(user_email, advertiser_name, order_name, placements, ad_units, sizes, prices, num_creatives, currency_code)
 
 if __name__ == '__main__':
   main()
